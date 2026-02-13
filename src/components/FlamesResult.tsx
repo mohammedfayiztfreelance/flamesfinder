@@ -10,6 +10,38 @@ interface FlamesResultProps {
 export const FlamesResultDisplay = ({ result, onReset }: FlamesResultProps) => {
   const meaning = FLAMES_MEANINGS[result.result];
 
+  // 🔥 Random Share Messages
+  const shareMessages = [
+    `🔥 I just tried this cool FLAMES Finder website and it was actually fun 😌
+
+You should try it once and see what it says about you 👀✨
+
+👉 https://www.flamesfinder.site`,
+
+    `👀 Okay this was unexpectedly interesting…
+
+Tried FLAMES Finder and now I’m curious what it says for you 😏🔥
+
+Go try it!
+
+👉 https://www.flamesfinder.site`,
+
+    `🔥 Just discovered this fun FLAMES Finder site…
+
+It gave me a surprising result 😌  
+Now it’s your turn.
+
+👉 https://www.flamesfinder.site`
+  ];
+
+  const handleShare = () => {
+    const randomMessage =
+      shareMessages[Math.floor(Math.random() * shareMessages.length)];
+
+    const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(randomMessage)}`;
+    window.open(whatsappUrl, "_blank");
+  };
+
   return (
     <div className="glass-card rounded-xl sm:rounded-2xl p-4 sm:p-6 md:p-8 max-w-3xl mx-auto animate-reveal">
       {/* Result Header */}
@@ -37,11 +69,7 @@ export const FlamesResultDisplay = ({ result, onReset }: FlamesResultProps) => {
             Try another pair
           </Button>
           <Button
-            onClick={() => {
-              const message = `🔥 I just tried FLAMES Finder! ${result.name1} & ${result.name2} got "${meaning.word}" ${meaning.icon}! Try it yourself: ${window.location.href}`;
-              const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(message)}`;
-              window.open(whatsappUrl, '_blank');
-            }}
+            onClick={handleShare}
             size="sm"
             className="bg-[#25D366] hover:bg-[#20BD5A] text-white transition-all text-xs sm:text-sm"
           >
