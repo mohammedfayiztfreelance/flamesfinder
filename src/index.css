@@ -1,0 +1,202 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 222 47% 6%;
+    --foreground: 180 100% 97%;
+
+    --card: 222 40% 10%;
+    --card-foreground: 180 100% 97%;
+
+    --popover: 222 40% 10%;
+    --popover-foreground: 180 100% 97%;
+
+    --primary: 142 76% 50%;
+    --primary-foreground: 222 47% 6%;
+
+    --secondary: 222 30% 18%;
+    --secondary-foreground: 180 100% 97%;
+
+    --muted: 222 30% 20%;
+    --muted-foreground: 215 20% 55%;
+
+    --accent: 142 76% 50%;
+    --accent-foreground: 222 47% 6%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 142 40% 25%;
+    --input: 222 30% 15%;
+    --ring: 142 76% 50%;
+
+    --radius: 0.75rem;
+
+    /* Brand color - golden/amber for maximum attention */
+    --brand: 45 100% 60%;
+    --brand-glow: 0 0 10px hsl(45 100% 60%), 0 0 20px hsl(45 100% 50% / 0.6), 0 0 40px hsl(45 100% 50% / 0.4);
+
+    /* Custom tokens */
+    --glow-primary: 0 0 20px hsl(142 76% 50% / 0.4);
+    --glow-primary-strong: 0 0 40px hsl(142 76% 50% / 0.6);
+    --gradient-dark: linear-gradient(180deg, hsl(222 47% 8%) 0%, hsl(222 47% 4%) 100%);
+    --gradient-card: linear-gradient(135deg, hsl(222 40% 12%) 0%, hsl(222 40% 8%) 100%);
+    --gradient-glow: radial-gradient(ellipse at center, hsl(142 76% 50% / 0.1) 0%, transparent 70%);
+  }
+
+  .dark {
+    --background: 222 47% 6%;
+    --foreground: 180 100% 97%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-outfit antialiased;
+    background: var(--gradient-dark);
+    min-height: 100vh;
+  }
+}
+
+@layer utilities {
+  .glow-text {
+    text-shadow: var(--glow-primary);
+  }
+
+  .glow-box {
+    box-shadow: var(--glow-primary);
+  }
+
+  .glow-box-strong {
+    box-shadow: var(--glow-primary-strong);
+  }
+
+  .brand-text-gradient {
+    background: linear-gradient(
+      90deg,
+      hsl(330 85% 60%) 0%,
+      hsl(280 80% 65%) 25%,
+      hsl(200 90% 60%) 50%,
+      hsl(160 80% 55%) 75%,
+      hsl(45 95% 60%) 100%
+    );
+    background-size: 200% auto;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: gradient-shift 4s ease-in-out infinite;
+  }
+
+  .glass-card {
+    background: var(--gradient-card);
+    border: 1px solid hsl(var(--border));
+    backdrop-filter: blur(10px);
+  }
+
+  .firefly {
+    position: absolute;
+    width: 4px;
+    height: 4px;
+    background: hsl(var(--primary));
+    border-radius: 50%;
+    box-shadow: 0 0 10px hsl(var(--primary)), 0 0 20px hsl(var(--primary));
+    animation: firefly-float 8s ease-in-out infinite;
+  }
+
+  .flames-letter {
+    @apply inline-flex items-center justify-center w-12 h-12 rounded-lg text-xl font-bold transition-all duration-300;
+  }
+
+  .flames-letter-active {
+    @apply bg-primary text-primary-foreground glow-box;
+  }
+
+  .flames-letter-eliminated {
+    @apply bg-muted/50 text-muted-foreground line-through opacity-50;
+  }
+
+  .flames-letter-pending {
+    @apply bg-secondary text-foreground;
+  }
+}
+
+@keyframes firefly-float {
+  0%, 100% {
+    transform: translateY(0) translateX(0);
+    opacity: 0.3;
+  }
+  25% {
+    transform: translateY(-30px) translateX(20px);
+    opacity: 1;
+  }
+  50% {
+    transform: translateY(-10px) translateX(-15px);
+    opacity: 0.6;
+  }
+  75% {
+    transform: translateY(-40px) translateX(10px);
+    opacity: 0.9;
+  }
+}
+
+@keyframes pulse-glow {
+  0%, 100% {
+    box-shadow: 0 0 20px hsl(var(--primary) / 0.4);
+  }
+  50% {
+    box-shadow: 0 0 40px hsl(var(--primary) / 0.8);
+  }
+}
+
+@keyframes gradient-shift {
+  0%, 100% {
+    background-position: 0% center;
+  }
+  50% {
+    background-position: 200% center;
+  }
+}
+
+@keyframes reveal-result {
+  0% {
+    transform: scale(0.8);
+    opacity: 0;
+  }
+  50% {
+    transform: scale(1.05);
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes count-bounce {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.2);
+    color: hsl(var(--primary));
+  }
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+.animate-reveal {
+  animation: reveal-result 0.6s ease-out forwards;
+}
+
+.animate-count {
+  animation: count-bounce 0.3s ease-out;
+}
