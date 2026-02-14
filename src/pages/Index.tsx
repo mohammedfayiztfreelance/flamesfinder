@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Fireflies } from "@/components/Fireflies";
 import { FlamesInput } from "@/components/FlamesInput";
 import { FlamesAnimation } from "@/components/FlamesAnimation";
@@ -8,7 +8,7 @@ import { FeedbackSection } from "@/components/FeedbackSection";
 import { calculateFlames, FlamesResult } from "@/lib/flames";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { Mail } from "lucide-react";
+import { Volume2, VolumeX } from "lucide-react";
 import AppHeader from "@/components/AppHeader";
 import AppFooter from "@/components/AppFooter";
 
@@ -45,6 +45,11 @@ const Index = () => {
   const [gameState, setGameState] = useState<GameState>("input");
   const [result, setResult] = useState<FlamesResult | null>(null);
   const [restricted, setRestricted] = useState(false);
+  
+  /* ===========================
+     🎵 MUTE BUTTON STATE
+  =========================== */
+  const [isThemeMuted, setIsThemeMuted] = useState(false);
 
   /* ===========================
      🎵 MUSIC LOGIC
@@ -52,43 +57,128 @@ const Index = () => {
 
   const themeAudioRef = useRef<HTMLAudioElement | null>(null);
   const requestAudioRef = useRef<HTMLAudioElement | null>(null);
+  
+  // Store theme position
+  const themeCurrentTimeRef = useRef<number>(0);
 
   // ✅ Songs audio with Spotify-style features
   const songsAudioRef = useRef<HTMLAudioElement | null>(null);
   const [currentSong, setCurrentSong] = useState<string | null>(null);
   const [isSongPlaying, setIsSongPlaying] = useState(false);
-  const [songProgress, setSongProgress] = useState(0);
+  
+  // Store progress for each song separately
+  const [songProgress, setSongProgress] = useState<Record<string, number>>({});
+  const [songDuration, setSongDuration] = useState<Record<string, number>>({});
+  const [songCurrentTime, setSongCurrentTime] = useState<Record<string, number>>({});
+  
+  // Store song position for each song separately
+  const songPositions = useRef<Map<string, number>>(new Map());
+
+  // Format time as mm:ss
+  const formatTime = (seconds: number) => {
+    if (isNaN(seconds) || seconds === 0) return "0:00";
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const toggleThemeMute = () => {
+    if (themeAudioRef.current) {
+      const newMutedState = !isThemeMuted;
+      themeAudioRef.current.muted = newMutedState;
+      setIsThemeMuted(newMutedState);
+      
+      // If unmuting and conditions are right, play theme
+      if (!newMutedState && !isSongPlaying && (gameState === "animating" || gameState === "result")) {
+        themeAudioRef.current.currentTime = themeCurrentTimeRef.current;
+        themeAudioRef.current.play().catch(() => {});
+      }
+      // If muting, save position and pause
+      else if (newMutedState && themeAudioRef.current) {
+        themeCurrentTimeRef.current = themeAudioRef.current.currentTime;
+        themeAudioRef.current.pause();
+      }
+    }
+  };
 
   const playSong = (src: string, title: string) => {
+    // Save theme position before pausing
     if (themeAudioRef.current) {
+      themeCurrentTimeRef.current = themeAudioRef.current.currentTime;
       themeAudioRef.current.pause();
     }
 
+    // If clicking the same song that's playing -> pause it
     if (currentSong === title && songsAudioRef.current) {
+      // Save position before pausing
+      songPositions.current.set(title, songsAudioRef.current.currentTime);
+      
       songsAudioRef.current.pause();
-      songsAudioRef.current = null;
       setCurrentSong(null);
       setIsSongPlaying(false);
-      setSongProgress(0);
+      
+      // Resume theme from where it left off
+      if (themeAudioRef.current && (gameState === "animating" || gameState === "result") && !isThemeMuted) {
+        themeAudioRef.current.currentTime = themeCurrentTimeRef.current;
+        themeAudioRef.current.play().catch(() => {});
+      }
       return;
     }
 
+    // Stop any other song that might be playing
     if (songsAudioRef.current) {
+      // Save position of current song before switching
+      if (currentSong) {
+        songPositions.current.set(currentSong, songsAudioRef.current.currentTime);
+      }
+      
+      // 🔥 CRITICAL FIX: detach old listeners to prevent ghost updates
+      songsAudioRef.current.ontimeupdate = null;
+      songsAudioRef.current.onloadedmetadata = null;
+      songsAudioRef.current.onended = null;
+      
       songsAudioRef.current.pause();
     }
 
+    // Create and play new song
     const audio = new Audio(src);
+    audio.preload = "metadata"; // Optional improvement
+    
+    // Get saved position for this song (if any)
+    const savedPosition = songPositions.current.get(title) || 0;
+
+    audio.onloadedmetadata = () => {
+      setSongDuration(prev => ({ ...prev, [title]: audio.duration }));
+
+      if (savedPosition > 0) {
+        audio.currentTime = savedPosition;
+      }
+    };
 
     audio.ontimeupdate = () => {
-      const percent =
-        (audio.currentTime / audio.duration) * 100;
-      setSongProgress(percent || 0);
+      if (!audio.duration || isNaN(audio.duration)) return;
+
+      const percent = (audio.currentTime / audio.duration) * 100;
+
+      setSongProgress(prev => ({ ...prev, [title]: percent || 0 }));
+      setSongCurrentTime(prev => ({ ...prev, [title]: audio.currentTime }));
+      // Update saved position
+      songPositions.current.set(title, audio.currentTime);
     };
 
     audio.onended = () => {
-      setIsSongPlaying(false);
+      // Clear saved position when song ends naturally
+      songPositions.current.delete(title);
+      setSongProgress(prev => ({ ...prev, [title]: 0 }));
+      setSongCurrentTime(prev => ({ ...prev, [title]: 0 }));
       setCurrentSong(null);
-      setSongProgress(0);
+      setIsSongPlaying(false);
+      
+      // Resume theme from where it left off when song ends
+      if (themeAudioRef.current && (gameState === "animating" || gameState === "result") && !isThemeMuted) {
+        themeAudioRef.current.currentTime = themeCurrentTimeRef.current;
+        themeAudioRef.current.play().catch(() => {});
+      }
     };
 
     audio.play().catch(() => {});
@@ -97,19 +187,69 @@ const Index = () => {
     setIsSongPlaying(true);
   };
 
-  if (!themeAudioRef.current) {
-    themeAudioRef.current = new Audio("/theme.mp3");
-    themeAudioRef.current.loop = true;
-    themeAudioRef.current.volume = 0.6;
-  }
+  // Initialize theme audio
+  useEffect(() => {
+    if (!themeAudioRef.current) {
+      themeAudioRef.current = new Audio("/theme.mp3");
+      themeAudioRef.current.loop = true;
+      themeAudioRef.current.volume = 0.6;
+    }
 
-  if (!requestAudioRef.current) {
-    requestAudioRef.current = new Audio("/restricted.mp3");
-    requestAudioRef.current.loop = false;
-    requestAudioRef.current.volume = 0.7;
-  }
+    if (!requestAudioRef.current) {
+      requestAudioRef.current = new Audio("/restricted.mp3");
+      requestAudioRef.current.loop = false;
+      requestAudioRef.current.volume = 0.7;
+    }
+
+    // Cleanup on unmount
+    return () => {
+      if (themeAudioRef.current) {
+        themeAudioRef.current.pause();
+      }
+      if (requestAudioRef.current) {
+        requestAudioRef.current.pause();
+      }
+      if (songsAudioRef.current) {
+        songsAudioRef.current.pause();
+      }
+    };
+  }, []);
+
+  // 🔥 FIXED: Handle theme music based on game state (no restart on result)
+  useEffect(() => {
+    if (!themeAudioRef.current) return;
+
+    // play only when animation starts
+    if (gameState === "animating" && !isSongPlaying && !isThemeMuted) {
+      themeAudioRef.current.currentTime = themeCurrentTimeRef.current;
+      themeAudioRef.current.play().catch(() => {});
+    }
+
+    // pause when returning to input
+    if (gameState === "input") {
+      themeAudioRef.current.pause();
+    }
+
+  }, [gameState, isSongPlaying, isThemeMuted]);
 
   const handleCalculate = async (name1: string, name2: string) => {
+    // Stop any playing song from the playlist
+    if (songsAudioRef.current) {
+      if (currentSong) {
+        songPositions.current.set(currentSong, songsAudioRef.current.currentTime);
+      }
+      
+      // 🔥 CRITICAL FIX: detach listeners when stopping songs during calculation
+      songsAudioRef.current.ontimeupdate = null;
+      songsAudioRef.current.onloadedmetadata = null;
+      songsAudioRef.current.onended = null;
+      
+      songsAudioRef.current.pause();
+      songsAudioRef.current = null;
+      setCurrentSong(null);
+      setIsSongPlaying(false);
+    }
+
     const flamesResult = calculateFlames(name1, name2);
 
     supabase
@@ -132,7 +272,8 @@ const Index = () => {
     }
 
     setResult(flamesResult);
-    themeAudioRef.current?.play().catch(() => {});
+    
+    // Theme will play via useEffect when gameState becomes "animating"
     setGameState("animating");
   };
 
@@ -141,9 +282,11 @@ const Index = () => {
   };
 
   const handleReset = () => {
+    // Stop all audio
     if (themeAudioRef.current) {
       themeAudioRef.current.pause();
       themeAudioRef.current.currentTime = 0;
+      themeCurrentTimeRef.current = 0;
     }
 
     if (requestAudioRef.current) {
@@ -151,9 +294,41 @@ const Index = () => {
       requestAudioRef.current.currentTime = 0;
     }
 
+    if (songsAudioRef.current) {
+      if (currentSong) {
+        songPositions.current.set(currentSong, songsAudioRef.current.currentTime);
+      }
+      
+      // 🔥 CRITICAL FIX: detach listeners on reset
+      songsAudioRef.current.ontimeupdate = null;
+      songsAudioRef.current.onloadedmetadata = null;
+      songsAudioRef.current.onended = null;
+      
+      songsAudioRef.current.pause();
+      songsAudioRef.current = null;
+      setCurrentSong(null);
+      setIsSongPlaying(false);
+    }
+
     setResult(null);
     setRestricted(false);
     setGameState("input");
+  };
+
+  // Handle seeking on progress bar
+  const handleSeek = (e: React.MouseEvent<HTMLDivElement>, songTitle: string) => {
+    if (currentSong !== songTitle || !songsAudioRef.current) return;
+    
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const width = rect.width;
+    const percentage = x / width;
+    const newTime = percentage * songsAudioRef.current.duration;
+    
+    songsAudioRef.current.currentTime = newTime;
+    songPositions.current.set(songTitle, newTime);
+    setSongProgress(prev => ({ ...prev, [songTitle]: percentage * 100 }));
+    setSongCurrentTime(prev => ({ ...prev, [songTitle]: newTime }));
   };
 
   return (
@@ -161,6 +336,17 @@ const Index = () => {
 
       <Fireflies />
       <AppHeader />
+
+      {/* =========================== */}
+      {/* 🔇 MUTE BUTTON - Always visible */}
+      {/* =========================== */}
+      <button
+        onClick={toggleThemeMute}
+        className="fixed top-20 right-4 z-50 w-10 h-10 rounded-full bg-black/50 backdrop-blur-sm border border-primary/30 flex items-center justify-center text-primary hover:scale-110 transition-all"
+        title={isThemeMuted ? "Unmute theme music" : "Mute theme music"}
+      >
+        {isThemeMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}
+      </button>
 
       <div className="flex-1 relative z-10">
 
@@ -283,7 +469,7 @@ const Index = () => {
       </div>
 
       {/* =========================== */}
-      {/* OUR SONGS SECTION - 4 TRACKS */}
+      {/* OUR SONGS SECTION - 4 TRACKS with Spotify-style slider */}
       {/* =========================== */}
       <div className="mt-16 sm:mt-20 md:mt-24 px-4">
         <div className="max-w-3xl mx-auto glass-card rounded-2xl p-6 sm:p-8">
@@ -292,103 +478,175 @@ const Index = () => {
           </h2>
 
           {/* Song 1: Crush to Rush (Tamil) */}
-          <div className="flex items-center gap-4 mb-6">
-            <button
-              onClick={() => playSong("/song1.mp3", "Crush to Rush")}
-              className="w-12 h-12 rounded-full bg-primary flex items-center justify-center text-black font-bold hover:scale-105 transition shrink-0"
-            >
-              {isSongPlaying && currentSong === "Crush to Rush" ? "❚❚" : "▶"}
-            </button>
-            <div className="flex-1 min-w-0">
-              <p className={`font-semibold truncate transition-colors ${
-                isSongPlaying && currentSong === "Crush to Rush" ? "text-green-500" : "text-foreground"
-              }`}>
-                Crush to Rush
-              </p>
-              <p className="text-xs text-muted-foreground">
-                Artist: Fzee • Language: Tamil
-              </p>
-              {isSongPlaying && currentSong === "Crush to Rush" && (
-                <div className="w-full h-1 bg-muted rounded-full mt-2 overflow-hidden">
-                  <div className="h-full bg-green-500 transition-all duration-100" style={{ width: `${songProgress}%` }} />
-                </div>
-              )}
+          <div className="mb-6">
+            <div className="flex items-center gap-4">
+              <button
+                onClick={() => playSong("/song1.mp3", "Crush to Rush")}
+                className="w-12 h-12 rounded-full bg-primary flex items-center justify-center text-black font-bold hover:scale-105 transition shrink-0"
+              >
+                {isSongPlaying && currentSong === "Crush to Rush" ? "❚❚" : "▶"}
+              </button>
+              <div className="flex-1 min-w-0">
+                <p className={`font-semibold truncate transition-colors ${
+                  isSongPlaying && currentSong === "Crush to Rush" ? "text-green-500" : "text-foreground"
+                }`}>
+                  Crush to Rush
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Artist: Fzee • Language: Tamil
+                </p>
+              </div>
             </div>
+            
+            {/* Progress Bar with Time Display - Spotify Style */}
+            {isSongPlaying && currentSong === "Crush to Rush" && (
+              <div className="mt-2 pl-16">
+                <div 
+                  className="w-full h-2 bg-muted rounded-full cursor-pointer relative group"
+                  onClick={(e) => handleSeek(e, "Crush to Rush")}
+                >
+                  <div 
+                    className="h-full bg-green-500 rounded-full transition-all relative"
+                    style={{ width: `${songProgress["Crush to Rush"] || 0}%` }}
+                  >
+                    {/* Hover handle */}
+                    <div className="absolute right-0 top-1/2 -translate-y-1/2 w-4 h-4 bg-green-500 rounded-full opacity-0 group-hover:opacity-100 transition-opacity" />
+                  </div>
+                </div>
+                
+                {/* Time display */}
+                <div className="flex justify-between text-xs text-muted-foreground mt-1">
+                  <span>{formatTime(songCurrentTime["Crush to Rush"] || 0)}</span>
+                  <span>{formatTime(songDuration["Crush to Rush"] || 0)}</span>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Song 2: Nuvve Naa Beat (Telugu) */}
-          <div className="flex items-center gap-4 mb-6">
-            <button
-              onClick={() => playSong("/song2.mp3", "Nuvve Naa Beat")}
-              className="w-12 h-12 rounded-full bg-primary flex items-center justify-center text-black font-bold hover:scale-105 transition shrink-0"
-            >
-              {isSongPlaying && currentSong === "Nuvve Naa Beat" ? "❚❚" : "▶"}
-            </button>
-            <div className="flex-1 min-w-0">
-              <p className={`font-semibold truncate transition-colors ${
-                isSongPlaying && currentSong === "Nuvve Naa Beat" ? "text-green-500" : "text-foreground"
-              }`}>
-                Nuvve Naa Beat Raa
-              </p>
-              <p className="text-xs text-muted-foreground">
-                Artist: Fzee • Language: Telugu
-              </p>
-              {isSongPlaying && currentSong === "Nuvve Naa Beat" && (
-                <div className="w-full h-1 bg-muted rounded-full mt-2 overflow-hidden">
-                  <div className="h-full bg-green-500 transition-all duration-100" style={{ width: `${songProgress}%` }} />
-                </div>
-              )}
+          <div className="mb-6">
+            <div className="flex items-center gap-4">
+              <button
+                onClick={() => playSong("/song2.mp3", "Nuvve Naa Beat")}
+                className="w-12 h-12 rounded-full bg-primary flex items-center justify-center text-black font-bold hover:scale-105 transition shrink-0"
+              >
+                {isSongPlaying && currentSong === "Nuvve Naa Beat" ? "❚❚" : "▶"}
+              </button>
+              <div className="flex-1 min-w-0">
+                <p className={`font-semibold truncate transition-colors ${
+                  isSongPlaying && currentSong === "Nuvve Naa Beat" ? "text-green-500" : "text-foreground"
+                }`}>
+                  Nuvve Naa Beat
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Artist: Fzee • Language: Telugu
+                </p>
+              </div>
             </div>
+            
+            {isSongPlaying && currentSong === "Nuvve Naa Beat" && (
+              <div className="mt-2 pl-16">
+                <div 
+                  className="w-full h-2 bg-muted rounded-full cursor-pointer relative group"
+                  onClick={(e) => handleSeek(e, "Nuvve Naa Beat")}
+                >
+                  <div 
+                    className="h-full bg-green-500 rounded-full transition-all relative"
+                    style={{ width: `${songProgress["Nuvve Naa Beat"] || 0}%` }}
+                  >
+                    <div className="absolute right-0 top-1/2 -translate-y-1/2 w-4 h-4 bg-green-500 rounded-full opacity-0 group-hover:opacity-100 transition-opacity" />
+                  </div>
+                </div>
+                <div className="flex justify-between text-xs text-muted-foreground mt-1">
+                  <span>{formatTime(songCurrentTime["Nuvve Naa Beat"] || 0)}</span>
+                  <span>{formatTime(songDuration["Nuvve Naa Beat"] || 0)}</span>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Song 3: Bleeding Fire (English) */}
-          <div className="flex items-center gap-4 mb-6">
-            <button
-              onClick={() => playSong("/song3.mp3", "Bleeding Fire")}
-              className="w-12 h-12 rounded-full bg-primary flex items-center justify-center text-black font-bold hover:scale-105 transition shrink-0"
-            >
-              {isSongPlaying && currentSong === "Bleeding Fire" ? "❚❚" : "▶"}
-            </button>
-            <div className="flex-1 min-w-0">
-              <p className={`font-semibold truncate transition-colors ${
-                isSongPlaying && currentSong === "Bleeding Fire" ? "text-green-500" : "text-foreground"
-              }`}>
-                Bleeding Fire
-              </p>
-              <p className="text-xs text-muted-foreground">
-                Artist: Fzee • Language: English
-              </p>
-              {isSongPlaying && currentSong === "Bleeding Fire" && (
-                <div className="w-full h-1 bg-muted rounded-full mt-2 overflow-hidden">
-                  <div className="h-full bg-green-500 transition-all duration-100" style={{ width: `${songProgress}%` }} />
-                </div>
-              )}
+          <div className="mb-6">
+            <div className="flex items-center gap-4">
+              <button
+                onClick={() => playSong("/song3.mp3", "Bleeding Fire")}
+                className="w-12 h-12 rounded-full bg-primary flex items-center justify-center text-black font-bold hover:scale-105 transition shrink-0"
+              >
+                {isSongPlaying && currentSong === "Bleeding Fire" ? "❚❚" : "▶"}
+              </button>
+              <div className="flex-1 min-w-0">
+                <p className={`font-semibold truncate transition-colors ${
+                  isSongPlaying && currentSong === "Bleeding Fire" ? "text-green-500" : "text-foreground"
+                }`}>
+                  Bleeding Fire
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Artist: Fzee • Language: English
+                </p>
+              </div>
             </div>
+            
+            {isSongPlaying && currentSong === "Bleeding Fire" && (
+              <div className="mt-2 pl-16">
+                <div 
+                  className="w-full h-2 bg-muted rounded-full cursor-pointer relative group"
+                  onClick={(e) => handleSeek(e, "Bleeding Fire")}
+                >
+                  <div 
+                    className="h-full bg-green-500 rounded-full transition-all relative"
+                    style={{ width: `${songProgress["Bleeding Fire"] || 0}%` }}
+                  >
+                    <div className="absolute right-0 top-1/2 -translate-y-1/2 w-4 h-4 bg-green-500 rounded-full opacity-0 group-hover:opacity-100 transition-opacity" />
+                  </div>
+                </div>
+                <div className="flex justify-between text-xs text-muted-foreground mt-1">
+                  <span>{formatTime(songCurrentTime["Bleeding Fire"] || 0)}</span>
+                  <span>{formatTime(songDuration["Bleeding Fire"] || 0)}</span>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Song 4: Na Lokam (Telugu) */}
-          <div className="flex items-center gap-4">
-            <button
-              onClick={() => playSong("/song4.mp3", "Na Lokam")}
-              className="w-12 h-12 rounded-full bg-primary flex items-center justify-center text-black font-bold hover:scale-105 transition shrink-0"
-            >
-              {isSongPlaying && currentSong === "Na Lokam" ? "❚❚" : "▶"}
-            </button>
-            <div className="flex-1 min-w-0">
-              <p className={`font-semibold truncate transition-colors ${
-                isSongPlaying && currentSong === "Na Lokam" ? "text-green-500" : "text-foreground"
-              }`}>
-                Na Lokam
-              </p>
-              <p className="text-xs text-muted-foreground">
-                Artist: Fzee • Language: Telugu
-              </p>
-              {isSongPlaying && currentSong === "Na Lokam" && (
-                <div className="w-full h-1 bg-muted rounded-full mt-2 overflow-hidden">
-                  <div className="h-full bg-green-500 transition-all duration-100" style={{ width: `${songProgress}%` }} />
-                </div>
-              )}
+          <div className="mb-6">
+            <div className="flex items-center gap-4">
+              <button
+                onClick={() => playSong("/song4.mp3", "Na Lokam")}
+                className="w-12 h-12 rounded-full bg-primary flex items-center justify-center text-black font-bold hover:scale-105 transition shrink-0"
+              >
+                {isSongPlaying && currentSong === "Na Lokam" ? "❚❚" : "▶"}
+              </button>
+              <div className="flex-1 min-w-0">
+                <p className={`font-semibold truncate transition-colors ${
+                  isSongPlaying && currentSong === "Na Lokam" ? "text-green-500" : "text-foreground"
+                }`}>
+                  Na Lokam
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Artist: Fzee • Language: Telugu
+                </p>
+              </div>
             </div>
+            
+            {isSongPlaying && currentSong === "Na Lokam" && (
+              <div className="mt-2 pl-16">
+                <div 
+                  className="w-full h-2 bg-muted rounded-full cursor-pointer relative group"
+                  onClick={(e) => handleSeek(e, "Na Lokam")}
+                >
+                  <div 
+                    className="h-full bg-green-500 rounded-full transition-all relative"
+                    style={{ width: `${songProgress["Na Lokam"] || 0}%` }}
+                  >
+                    <div className="absolute right-0 top-1/2 -translate-y-1/2 w-4 h-4 bg-green-500 rounded-full opacity-0 group-hover:opacity-100 transition-opacity" />
+                  </div>
+                </div>
+                <div className="flex justify-between text-xs text-muted-foreground mt-1">
+                  <span>{formatTime(songCurrentTime["Na Lokam"] || 0)}</span>
+                  <span>{formatTime(songDuration["Na Lokam"] || 0)}</span>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Footer Note */}
