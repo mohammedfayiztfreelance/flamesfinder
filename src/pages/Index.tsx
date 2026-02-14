@@ -328,7 +328,7 @@ const Index = () => {
               <p className={`font-semibold truncate transition-colors ${
                 isSongPlaying && currentSong === "Nuvve Naa Beat" ? "text-green-500" : "text-foreground"
               }`}>
-                Nuvve Naa Beat
+                Nuvve Naa Beat Raa
               </p>
               <p className="text-xs text-muted-foreground">
                 Artist: Fzee • Language: Telugu
